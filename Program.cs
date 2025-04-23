@@ -21,7 +21,7 @@ builder.Services.AddAuthentication("Bearer")
 // Configuration de l'autorisation
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("ApiScope", policy =>
+    options.AddPolicy("KataSimpleAPI", policy =>
     {
         policy.RequireAuthenticatedUser();
         policy.RequireClaim("scope", "KataSimpleAPI");
@@ -43,6 +43,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // Modifiez cette ligne pour appliquer l'autorisation
-app.MapControllers().RequireAuthorization("ApiScope");
+app.MapControllers();
 
 app.Run();

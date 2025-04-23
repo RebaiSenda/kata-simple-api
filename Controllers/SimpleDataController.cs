@@ -5,6 +5,7 @@ namespace KataSimpleAPI.Controllers
 {
     [Route("api/data")]
     [ApiController]
+
     public class DataController : ControllerBase
     {
         private readonly ILogger<DataController> _logger;
@@ -15,7 +16,7 @@ namespace KataSimpleAPI.Controllers
         }
 
         [HttpGet]
-        [Authorize]
+        [Authorize("KataSimpleAPI")]
         [Produces("application/json")]
         [ProducesResponseType(typeof(SimpleDataResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
