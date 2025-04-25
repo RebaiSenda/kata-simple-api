@@ -28,14 +28,14 @@ namespace KataSimpleAPI.Controllers
             var data = new SimpleDataResponse
             {
                 Message = "Données complémentaires pour le système de réservation",
-                Items = new List<SimpleDataItem>
-                {
-                    new SimpleDataItem { Id = 1, Name = "Informations importantes" },
-                    new SimpleDataItem { Id = 2, Name = "Règles de réservation" },
-                    new SimpleDataItem { Id = 3, Name = "Consignes spéciales" },
-                    new SimpleDataItem { Id = 4, Name = "Contacts administratifs" },
-                    new SimpleDataItem { Id = 5, Name = "Procédures d'urgence" }
-                }
+                Items =
+               [
+                   new() { Id = 1, Name = "Informations importantes" },
+                    new() { Id = 2, Name = "Règles de réservation" },
+                    new() { Id = 3, Name = "Consignes spéciales" },
+                    new() { Id = 4, Name = "Contacts administratifs" },
+                    new() { Id = 5, Name = "Procédures d'urgence" }
+               ]
             };
 
             return Ok(data);
