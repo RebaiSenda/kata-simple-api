@@ -3,20 +3,10 @@ using RabbitMQ.Client.Events;
 using RabbitMQ.Client;
 using System.Text;
 using System.Text.Json;
+using KataSimpleAPI.Models;
 
 namespace KataSimpleAPI.Services
 {
-    public class BookingNotificationMessage
-    {
-        public int BookingId { get; set; }
-        public int RoomId { get; set; }
-        public int PersonId { get; set; }
-        public DateTime BookingDate { get; set; }
-        public int StartSlot { get; set; }
-        public int EndSlot { get; set; }
-        public string Status { get; set; } = string.Empty;
-    }
-
     public class RabbitMQConfig
     {
         public string HostName { get; set; } = "localhost";
@@ -24,7 +14,11 @@ namespace KataSimpleAPI.Services
         public string Password { get; set; } = "guest";
         public string BookingExchange { get; set; } = "booking_exchange";
         public string BookingCreatedQueue { get; set; } = "booking_created_queue";
+        public string BookingDeletedQueue { get; set; } = "booking_deleted_queue";
+        public string BookingUpdatedQueue { get; set; } = "booking_updated_queue";
         public string BookingCreatedRoutingKey { get; set; } = "booking.created";
+        public string BookingDeletedRoutingKey { get; set; } = "booking.deleted";
+        public string BookingUpdatedRoutingKey { get; set; } = "booking.updated";
     }
 
     public class RabbitMQConsumerService : BackgroundService
@@ -62,20 +56,10 @@ namespace KataSimpleAPI.Services
                     type: ExchangeType.Direct,
                     durable: true);
 
-                // Déclarer la queue
-                _channel.QueueDeclare(
-                    queue: _config.BookingCreatedQueue,
-                    durable: true,
-                    exclusive: false,
-                    autoDelete: false);
+                // Configurer toutes les queues
+                SetupQueues();
 
-                // Lier la queue à l'exchange
-                _channel.QueueBind(
-                    queue: _config.BookingCreatedQueue,
-                    exchange: _config.BookingExchange,
-                    routingKey: _config.BookingCreatedRoutingKey);
-
-                _logger.LogInformation("Connected to RabbitMQ consumer and configured exchange/queue");
+                _logger.LogInformation("Connected to RabbitMQ consumer and configured exchange/queues");
             }
             catch (Exception ex)
             {
@@ -84,90 +68,110 @@ namespace KataSimpleAPI.Services
             }
         }
 
+        private void SetupQueues()
+        {
+            // Configuration des queues avec leurs routing keys
+            var queueConfigs = new[]
+            {
+                (_config.BookingCreatedQueue, _config.BookingCreatedRoutingKey),
+                (_config.BookingDeletedQueue, _config.BookingDeletedRoutingKey),
+                (_config.BookingUpdatedQueue, _config.BookingUpdatedRoutingKey)
+            };
+
+            foreach (var (queueName, routingKey) in queueConfigs)
+            {
+                _channel.QueueDeclare(
+                    queue: queueName,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false);
+
+                _channel.QueueBind(
+                    queue: queueName,
+                    exchange: _config.BookingExchange,
+                    routingKey: routingKey);
+            }
+        }
+
         protected override Task ExecuteAsync(CancellationToken stoppingToken)
         {
             stoppingToken.ThrowIfCancellationRequested();
 
-            var consumer = new EventingBasicConsumer(_channel);
-
-            consumer.Received += (_, ea) =>
-            {
-                try
-                {
-                    var body = ea.Body.ToArray();
-                    var message = Encoding.UTF8.GetString(body);
-                    var bookingNotification = JsonSerializer.Deserialize<BookingNotificationMessage>(message);
-
-                    if (bookingNotification != null)
-                    {
-                        _logger.LogInformation("Message reçu: BookingId {BookingId}, Status {Status}",
-                            bookingNotification.BookingId, bookingNotification.Status);
-
-                        // Traiter le message selon le statut
-                        switch (bookingNotification.Status)
-                        {
-                            case "Created":
-                                ProcessBookingCreated(bookingNotification);
-                                break;
-                            case "Deleted":
-                                ProcessBookingDeleted(bookingNotification.BookingId);
-                                break;
-                            default:
-                                _logger.LogWarning("Status de réservation non reconnu: {Status}", bookingNotification.Status);
-                                break;
-                        }
-                    }
-
-                    // Acknowledge le message
-                    _channel.BasicAck(ea.DeliveryTag, false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Erreur lors du traitement du message RabbitMQ");
-                    // En cas d'erreur, on peut soit rejeter le message, soit le remettre dans la queue
-                    _channel.BasicNack(ea.DeliveryTag, false, true); // Remet le message dans la queue
-                }
-            };
-
-            _channel.BasicConsume(
-                queue: _config.BookingCreatedQueue,
-                autoAck: false, // Important: on veut confirmer manuellement
-                consumer: consumer);
+            // Configurer le consumer pour toutes les queues
+            SetupConsumers();
 
             return Task.CompletedTask;
         }
 
-        private void ProcessBookingCreated(BookingNotificationMessage booking)
+        private void SetupConsumers()
         {
-            // Traitement lors de la création d'une réservation
-            _logger.LogInformation("Traitement de la création de réservation: ID {BookingId}, Salle {RoomId}, Personne {PersonId}",
-                booking.BookingId, booking.RoomId, booking.PersonId);
+            var queues = new[]
+            {
+                _config.BookingCreatedQueue,
+                _config.BookingDeletedQueue,
+                _config.BookingUpdatedQueue
+            };
 
-            // Ici, vous pourriez implémenter:
-            // - Stockage en base de données
-            // - Envoi d'email de confirmation
-            // - Mise à jour des statistiques d'occupation, etc.
-        }
+            foreach (var queue in queues)
+            {
+                var consumer = new EventingBasicConsumer(_channel);
+                consumer.Received += async (_, ea) =>
+                {
+                    try
+                    {
+                        var body = ea.Body.ToArray();
+                        var message = Encoding.UTF8.GetString(body);
+                        var bookingMessage = JsonSerializer.Deserialize<BookingMessage>(message);
 
-        private void ProcessBookingDeleted(int bookingId)
-        {
-            // Traitement lors de la suppression d'une réservation
-            _logger.LogInformation("Traitement de la suppression de réservation: ID {BookingId}", bookingId);
+                        if (bookingMessage != null)
+                        {
+                            _logger.LogInformation("Message reçu de {Queue}: BookingId {BookingId}, Status {Status}",
+                                queue, bookingMessage.BookingId, bookingMessage.Status);
 
-            // Ici, vous pourriez implémenter:
-            // - Suppression de la réservation en base de données
-            // - Envoi d'email d'annulation
-            // - Mise à jour des statistiques d'occupation, etc.
+                            // Traitement asynchrone avec scope de DI
+                            using var scope = _serviceProvider.CreateScope();
+                            var processor = scope.ServiceProvider.GetRequiredService<IFakeBookingProcessor>(); 
+                            var smtpEmailSender = scope.ServiceProvider.GetRequiredService<ISmtpEmailSender>();
+                            await StaticEmailService.SendUpdateEmailAsync(bookingMessage, smtpEmailSender);
+                            await Task.Run(() => processor.ProcessBooking(bookingMessage));
+                        }
+
+                        // Acknowledge le message
+                        _channel.BasicAck(ea.DeliveryTag, false);
+
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Erreur lors du traitement du message RabbitMQ de {Queue}", queue);
+                        // Rejeter le message et le remettre dans la queue pour retry
+                        _channel.BasicNack(ea.DeliveryTag, false, true);
+                    }
+                };
+
+                _channel.BasicConsume(
+                    queue: queue,
+                    autoAck: false,
+                    consumer: consumer);
+            }
         }
 
         public override void Dispose()
         {
-            _channel?.Close();
-            _connection?.Close();
-            _channel?.Dispose();
-            _connection?.Dispose();
-            base.Dispose();
+            try
+            {
+                _channel?.Close();
+                _connection?.Close();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during RabbitMQ cleanup");
+            }
+            finally
+            {
+                _channel?.Dispose();
+                _connection?.Dispose();
+                base.Dispose();
+            }
         }
     }
 }
-
